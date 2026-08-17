@@ -41,4 +41,4 @@ jobs:
       
       - name: Log result
         if: always()
-        run: echo "✅ Check-in process completed"
+        run: echo "Check-in process completed"
