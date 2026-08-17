@@ -16,8 +16,10 @@ INFO_URL = "https://sg-hk4e-api.hoyolab.com/event/sol/info"
 ACT_ID = "e202102251931481"
 
 def get_headers(cookie, user_agent):
+    # Encode cookie to handle non-latin-1 characters
+    safe_cookie = cookie.encode("utf-8").decode("latin-1", errors="ignore")
     return {
-        "Cookie": cookie,
+        "Cookie": safe_cookie,
         "User-Agent": user_agent,
         "Referer": "https://act.hoyolab.com/",
         "Origin": "https://act.hoyolab.com/",
