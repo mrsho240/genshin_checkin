@@ -1,0 +1,44 @@
+name: Genshin Daily Check-in
+
+# ตั้งค่าเวลารัน - เวลา UTC+8
+# 0 0 * * * = ทุกวันเที่ยงคืน 00:00 UTC+8
+# หากต้องเปลี่ยนเวลา ให้แก้ cron ด้านล่าง
+on:
+  schedule:
+    # เวลา 00:00 UTC+8 (16:00 UTC ของวันก่อนหน้า)
+    - cron: '0 16 * * *'
+  
+  # ให้รันได้ด้วยมือ (Manual trigger)
+  workflow_dispatch:
+
+jobs:
+  checkin:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+      
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+      
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install requests
+      
+      - name: Run Genshin Check-in
+        env:
+          GENSHIN_UID: ${{ secrets.GENSHIN_UID }}
+          GENSHIN_SERVER: ${{ secrets.GENSHIN_SERVER }}
+          GENSHIN_COOKIE: ${{ secrets.GENSHIN_COOKIE }}
+          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python genshin_checkin.py
+      
+      - name: Log result
+        if: always()
+        run: echo "Check-in process completed"
