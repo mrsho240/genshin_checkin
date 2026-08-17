@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Genshin Impact Daily Check-in Automation
-ทำงานอัตโนมัติและส่งแจ้งเตือนไปยัง Discord/Telegram
+ทำงานอัตโนมัติและส่งแจ้งเตือนไป Discord/Telegram
 """
 
 import os
@@ -106,7 +106,7 @@ class GenshinCheckIn:
             payload = {
                 "embeds": [
                     {
-                        "title": "🎮 Genshin Impact Check-in",
+                        "title": "Genshin Impact Check-in",
                         "description": message,
                         "color": color,
                         "timestamp": datetime.utcnow().isoformat(),
@@ -121,11 +121,11 @@ class GenshinCheckIn:
                 timeout=10
             )
             response.raise_for_status()
-            logger.info("✅ ส่ง Discord notification สำเร็จ")
+            logger.info("ส่ง Discord notification สำเร็จ")
             return True
             
         except Exception as e:
-            logger.error(f"❌ Error ส่ง Discord: {str(e)}")
+            logger.error(f"Error ส่ง Discord: {str(e)}")
             return False
     
     def send_telegram_notification(self, message: str) -> bool:
@@ -145,11 +145,11 @@ class GenshinCheckIn:
             
             response = requests.post(url, json=payload, timeout=10)
             response.raise_for_status()
-            logger.info("✅ ส่ง Telegram notification สำเร็จ")
+            logger.info("ส่ง Telegram notification สำเร็จ")
             return True
             
         except Exception as e:
-            logger.error(f"❌ Error ส่ง Telegram: {str(e)}")
+            logger.error(f"Error ส่ง Telegram: {str(e)}")
             return False
 
 
@@ -162,23 +162,23 @@ def main():
     genshin_cookie = os.getenv('GENSHIN_COOKIE')
     
     if not all([genshin_uid, genshin_cookie]):
-        logger.error("❌ ต้องตั้งค่า GENSHIN_UID และ GENSHIN_COOKIE!")
+        logger.error("ต้องตั้งค่า GENSHIN_UID และ GENSHIN_COOKIE!")
         sys.exit(1)
     
     # สร้าง instance
     bot = GenshinCheckIn()
     
-    logger.info(f"🎮 เริ่มทำ Daily Check-in...")
-    logger.info(f"⏰ เวลา: {datetime.now().strftime('%Y-%m-%d %H:%M:%S UTC+8')}")
+    logger.info(f"เริ่มทำ Daily Check-in...")
+    logger.info(f"เวลา: {datetime.now().strftime('%Y-%m-%d %H:%M:%S UTC+8')}")
     
     # ทำการ Check-in
     result = bot.check_in(genshin_uid, genshin_server, genshin_cookie)
     
     # สร้างข้อความแจ้งเตือน
     if result['success']:
-        message = f"✅ **Check-in สำเร็จ!**\n{result['message']}\n⏰ {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}"
+        message = f"**Check-in สำเร็จ!**\n{result['message']}\n {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}"
     else:
-        message = f"❌ **Check-in ล้มเหลว**\n{result['message']}\n⏰ {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}"
+        message = f"**Check-in ล้มเหลว**\n{result['message']}\n {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}"
     
     logger.info(message)
     
