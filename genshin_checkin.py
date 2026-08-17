@@ -1,13 +1,11 @@
 #!/usr/bin/env python3
 """
-Genshin Impact Daily Check-in Automation
+Genshin Impact Daily Check-in via HoYoLab
 """
 
 import os
 import sys
 import requests
-import json
-from datetime import datetime
 import logging
 
 logging.basicConfig(
@@ -17,13 +15,13 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 class GenshinCheckIn:
-    """Genshin Impact Daily Check-in Handler"""
     
     def __init__(self):
         self.headers = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-            'Referer': 'https://act.hoyoverse.com/ys/event/signin-sea-v3/index.html',
-            'Accept-Language': 'th-TH,th;q=0.9',
+            'Referer': 'https://webstatic-sea.hoyolab.com/ys/event/signin-sea-v3/index.html',
+            'Accept': 'application/json',
+            'Content-Type': 'application/x-www-form-urlencoded'
         }
         self.discord_webhook = os.getenv('DISCORD_WEBHOOK')
         self.telegram_token = os.getenv('TELEGRAM_TOKEN')
@@ -31,21 +29,12 @@ class GenshinCheckIn:
         
     def check_in(self, uid: str, server: str, cookie: str) -> dict:
         """
-        Perform daily check-in
-        
-        Args:
-            uid: Game UID
-            server: Server (os_asia, os_cht, os_euro, os_usa)
-            cookie: Browser cookies
-        
-        Returns:
-            dict: Result of check-in
+        Perform daily check-in via HoYoLab
         """
         
-        # Use the public API endpoint that works for all servers
-        url = 'https://sg-public-api.hoyoverse.com/event/sol/sign'
+        url = 'https://webstatic-sea.hoyolab.com/ys/event/signin-sea-v3/sign'
         
-        params = {
+        data = {
             'act_id': 'e202102251931481'
         }
         
@@ -55,18 +44,16 @@ class GenshinCheckIn:
         try:
             logger.info(f"Attempting check-in for UID: {uid}")
             logger.info(f"Server: {server}")
-            logger.info(f"URL: {url}")
             
-            # Perform check-in
             response = requests.post(
                 url,
-                params=params,
+                data=data,
                 headers=headers,
                 timeout=10
             )
             
             logger.info(f"Status Code: {response.status_code}")
-            logger.info(f"Response: {response.text}")
+            logger.info(f"Response Text: {response.text}")
             
             if response.status_code != 200:
                 return {
@@ -74,49 +61,52 @@ class GenshinCheckIn:
                     'message': f'HTTP {response.status_code}: {response.text}'
                 }
             
-            result = response.json()
-            
-            # Check for errors in response
-            if result.get('retcode') != 0:
-                msg = result.get('message', 'Unknown error')
+            try:
+                result = response.json()
+                logger.info(f"Response JSON: {result}")
+                
+                retcode = result.get('retcode', -1)
+                message = result.get('message', 'Unknown response')
+                
+                if retcode == 0:
+                    return {
+                        'success': True,
+                        'message': message
+                    }
+                else:
+                    return {
+                        'success': False,
+                        'message': message
+                    }
+                    
+            except:
                 return {
                     'success': False,
-                    'message': msg
+                    'message': f'Invalid response: {response.text}'
                 }
             
-            logger.info(f"Check-in successful: {result}")
-            
-            return {
-                'success': True,
-                'message': result.get('message', 'Check-in successful'),
-                'data': result.get('data', {})
-            }
-            
         except Exception as e:
-            logger.error(f"Error: {str(e)}")
+            logger.error(f"Exception: {str(e)}")
             return {
                 'success': False,
                 'message': f'Error: {str(e)}'
             }
     
     def send_discord_notification(self, message: str, success: bool = True) -> bool:
-        """Send notification to Discord"""
         
         if not self.discord_webhook:
             logger.warning("Discord webhook not configured")
             return False
         
         try:
-            color = 65280 if success else 16711680  # Green or Red
+            color = 65280 if success else 16711680
             
             payload = {
                 "embeds": [
                     {
                         "title": "Genshin Impact Check-in",
                         "description": message,
-                        "color": color,
-                        "timestamp": datetime.utcnow().isoformat(),
-                        "footer": {"text": "Auto Check-in Bot"}
+                        "color": color
                     }
                 ]
             }
@@ -135,7 +125,6 @@ class GenshinCheckIn:
             return False
     
     def send_telegram_notification(self, message: str) -> bool:
-        """Send notification to Telegram"""
         
         if not self.telegram_token or not self.telegram_chat_id:
             logger.warning("Telegram not configured")
@@ -160,7 +149,6 @@ class GenshinCheckIn:
 
 
 def main():
-    """Main function"""
     
     genshin_uid = os.getenv('GENSHIN_UID')
     genshin_server = os.getenv('GENSHIN_SERVER', 'os_asia')
@@ -172,15 +160,14 @@ def main():
     
     bot = GenshinCheckIn()
     
-    logger.info(f"Starting Daily Check-in")
-    logger.info(f"Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    logger.info("Starting Daily Check-in")
     
     result = bot.check_in(genshin_uid, genshin_server, genshin_cookie)
     
     if result['success']:
-        message = f"Check-in successful!\n{result['message']}\nTime: {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}"
+        message = f"Check-in successful\n{result['message']}"
     else:
-        message = f"Check-in failed\n{result['message']}\nTime: {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}"
+        message = f"Check-in failed\n{result['message']}"
     
     logger.info(message)
     
