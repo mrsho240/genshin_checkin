@@ -11,171 +11,94 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-class GenshinCheckIn:
-    
-    def __init__(self):
-        self.headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-            'Referer': 'https://webstatic-sea.hoyolab.com/ys/event/signin-sea-v3/index.html',
-            'Accept': 'application/json',
-        }
-        self.discord_webhook = os.getenv('DISCORD_WEBHOOK')
-        self.telegram_token = os.getenv('TELEGRAM_TOKEN')
-        self.telegram_chat_id = os.getenv('TELEGRAM_CHAT_ID')
-        
-    def check_in(self, uid: str, server: str, cookie: str) -> dict:
-        
-        # Try multiple endpoints
-        endpoints = [
-            'https://webstatic-sea.hoyolab.com/ys/event/signin-sea-v3/sign',
-            'https://sg-public-api.hoyoverse.com/event/sol/sign',
-            'https://api-os-takumi.hoyoverse.com/event/sol/sign'
-        ]
-        
-        data = {'act_id': 'e202102251931481'}
-        
-        headers = self.headers.copy()
-        headers['Cookie'] = cookie
-        
-        logger.info(f"Attempting check-in for UID: {uid}")
-        logger.info(f"Server: {server}")
-        
-        for endpoint in endpoints:
-            try:
-                logger.info(f"Trying endpoint: {endpoint}")
-                
-                response = requests.post(
-                    endpoint,
-                    data=data,
-                    headers=headers,
-                    timeout=10
-                )
-                
-                logger.info(f"Status Code: {response.status_code}")
-                logger.info(f"Response: {response.text[:500]}")
-                
-                if response.status_code == 200:
-                    try:
-                        result = response.json()
-                        retcode = result.get('retcode', -1)
-                        message = result.get('message', 'Unknown')
-                        
-                        if retcode == 0:
-                            return {
-                                'success': True,
-                                'message': message
-                            }
-                        else:
-                            return {
-                                'success': False,
-                                'message': message
-                            }
-                    except:
-                        logger.info("Could not parse JSON, trying next endpoint")
-                        continue
-                        
-            except Exception as e:
-                logger.error(f"Endpoint {endpoint} failed: {str(e)}")
-                continue
-        
-        return {
-            'success': False,
-            'message': 'All endpoints failed. Check cookie validity.'
-        }
-    
-    def send_discord_notification(self, message: str, success: bool = True) -> bool:
-        
-        if not self.discord_webhook:
-            logger.info("Discord webhook not configured")
-            return False
-        
-        try:
-            color = 65280 if success else 16711680
-            
-            payload = {
-                "embeds": [
-                    {
-                        "title": "Genshin Impact Check-in",
-                        "description": message,
-                        "color": color
-                    }
-                ]
-            }
-            
-            response = requests.post(
-                self.discord_webhook,
-                json=payload,
-                timeout=10
-            )
-            if response.status_code == 204:
-                logger.info("Discord notification sent")
-                return True
-            else:
-                logger.error(f"Discord error: {response.status_code}")
-                return False
-            
-        except Exception as e:
-            logger.error(f"Discord error: {str(e)}")
-            return False
-    
-    def send_telegram_notification(self, message: str) -> bool:
-        
-        if not self.telegram_token or not self.telegram_chat_id:
-            logger.info("Telegram not configured")
-            return False
-        
-        try:
-            url = f"https://api.telegram.org/bot{self.telegram_token}/sendMessage"
-            
-            payload = {
-                "chat_id": self.telegram_chat_id,
-                "text": message
-            }
-            
-            response = requests.post(url, json=payload, timeout=10)
-            
-            logger.info(f"Telegram response: {response.status_code}")
-            
-            if response.status_code == 200:
-                logger.info("Telegram notification sent")
-                return True
-            else:
-                logger.error(f"Telegram error {response.status_code}: {response.text}")
-                return False
-            
-        except Exception as e:
-            logger.error(f"Telegram error: {str(e)}")
-            return False
+SIGN_URL = "https://sg-hk4e-api.hoyolab.com/event/sol/sign"
+INFO_URL = "https://sg-hk4e-api.hoyolab.com/event/sol/info"
+ACT_ID = "e202102251931481"
 
+def get_headers(cookie, user_agent):
+    return {
+        "Cookie": cookie,
+        "User-Agent": user_agent,
+        "Referer": "https://act.hoyolab.com/",
+        "Origin": "https://act.hoyolab.com/",
+        "Accept-Encoding": "gzip, deflate, br"
+    }
+
+def check_already_signed(cookie, user_agent):
+    headers = get_headers(cookie, user_agent)
+    res = requests.get(f"{INFO_URL}?act_id={ACT_ID}", headers=headers, timeout=10)
+    data = res.json()
+    logger.info(f"Info response: {data}")
+    if data.get("retcode") == 0:
+        return data["data"].get("is_sign", False)
+    return False
+
+def do_sign(cookie, user_agent):
+    headers = get_headers(cookie, user_agent)
+    res = requests.post(f"{SIGN_URL}?act_id={ACT_ID}", headers=headers, timeout=10)
+    data = res.json()
+    logger.info(f"Sign response: {data}")
+    return data
+
+def send_telegram(token, chat_id, message):
+    if not token or not chat_id:
+        logger.info("Telegram not configured")
+        return
+    url = f"https://api.telegram.org/bot{token}/sendMessage"
+    res = requests.post(url, json={"chat_id": chat_id, "text": message}, timeout=10)
+    logger.info(f"Telegram: {res.status_code} {res.text}")
+
+def send_discord(webhook_url, message):
+    if not webhook_url:
+        logger.info("Discord not configured")
+        return
+    res = requests.post(webhook_url, json={"content": message}, timeout=10)
+    logger.info(f"Discord: {res.status_code}")
 
 def main():
-    
-    genshin_uid = os.getenv('GENSHIN_UID')
-    genshin_server = os.getenv('GENSHIN_SERVER', 'os_asia')
-    genshin_cookie = os.getenv('GENSHIN_COOKIE')
-    
-    if not all([genshin_uid, genshin_cookie]):
-        logger.error("GENSHIN_UID and GENSHIN_COOKIE required")
+    cookie = os.getenv("GENSHIN_COOKIE")
+    user_agent = os.getenv("USER_AGENT", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+    telegram_token = os.getenv("TELEGRAM_TOKEN")
+    telegram_chat_id = os.getenv("TELEGRAM_CHAT_ID")
+    discord_webhook = os.getenv("DISCORD_WEBHOOK")
+
+    if not cookie:
+        logger.error("GENSHIN_COOKIE is required")
         sys.exit(1)
-    
-    bot = GenshinCheckIn()
-    
-    logger.info("Starting Check-in")
-    
-    result = bot.check_in(genshin_uid, genshin_server, genshin_cookie)
-    
-    if result['success']:
-        message = f"Check-in successful\n{result['message']}"
-    else:
-        message = f"Check-in failed\n{result['message']}"
-    
-    logger.info(message)
-    
-    bot.send_discord_notification(message, result['success'])
-    bot.send_telegram_notification(message)
-    
-    sys.exit(0 if result['success'] else 1)
 
+    try:
+        already_signed = check_already_signed(cookie, user_agent)
+        
+        if already_signed:
+            message = "Genshin check-in: Already checked in today"
+            logger.info(message)
+            send_telegram(telegram_token, telegram_chat_id, message)
+            send_discord(discord_webhook, message)
+            sys.exit(0)
 
-if __name__ == '__main__':
+        result = do_sign(cookie, user_agent)
+        retcode = result.get("retcode", -1)
+        msg = result.get("message", "Unknown")
+
+        if retcode == 0:
+            message = f"Genshin check-in successful\nMessage: {msg}"
+            logger.info(message)
+            send_telegram(telegram_token, telegram_chat_id, message)
+            send_discord(discord_webhook, message)
+            sys.exit(0)
+        else:
+            message = f"Genshin check-in failed\nRetcode: {retcode}\nMessage: {msg}"
+            logger.error(message)
+            send_telegram(telegram_token, telegram_chat_id, message)
+            send_discord(discord_webhook, message)
+            sys.exit(1)
+
+    except Exception as e:
+        message = f"Genshin check-in error: {str(e)}"
+        logger.error(message)
+        send_telegram(telegram_token, telegram_chat_id, message)
+        send_discord(discord_webhook, message)
+        sys.exit(1)
+
+if __name__ == "__main__":
     main()
