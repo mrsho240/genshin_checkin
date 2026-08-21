@@ -2,6 +2,7 @@
 
 import os
 import sys
+import json
 import requests
 import logging
 from datetime import datetime, timedelta, timezone
@@ -15,6 +16,7 @@ logger = logging.getLogger(__name__)
 SIGN_URL    = "https://sg-hk4e-api.hoyolab.com/event/sol/sign"
 INFO_URL    = "https://sg-hk4e-api.hoyolab.com/event/sol/info"
 REWARD_URL  = "https://sg-hk4e-api.hoyolab.com/event/sol/home"
+GAME_URL    = "https://sg-hk4e-api.hoyoverse.com/game_record/genshin/api/dailyNote"
 ACT_ID      = "e202102251931481"
 UTC8        = timezone(timedelta(hours=8))
 
@@ -32,44 +34,69 @@ def get_headers(cookie, user_agent):
 
 
 def get_sign_info(cookie, user_agent):
-    """ดึงข้อมูล check-in status ของเดือนนี้"""
     headers = get_headers(cookie, user_agent)
     res = requests.get(f"{INFO_URL}?act_id={ACT_ID}", headers=headers, timeout=10)
     data = res.json()
-    logger.info(f"Info response: {data}")
+    logger.info(f"Sign info: {data.get('retcode')}")
     if data.get("retcode") == 0:
         return data["data"]
     return None
 
 
 def get_reward_list(cookie, user_agent):
-    """ดึงรายการรางวัลทั้งเดือน"""
     headers = get_headers(cookie, user_agent)
     res = requests.get(f"{REWARD_URL}?act_id={ACT_ID}", headers=headers, timeout=10)
     data = res.json()
-    logger.info(f"Reward list response retcode: {data.get('retcode')}")
     if data.get("retcode") == 0:
         return data["data"].get("awards", [])
     return []
 
 
+def get_resin_info(uid, server, cookie, user_agent):
+    headers = get_headers(cookie, user_agent)
+    params = {
+        "uid": uid,
+        "server": server,
+        "genshin_uid": uid
+    }
+    try:
+        res = requests.get(GAME_URL, params=params, headers=headers, timeout=10)
+        data = res.json()
+        logger.info(f"Resin info: {data.get('retcode')}")
+        if data.get("retcode") == 0:
+            return data["data"]
+    except Exception as e:
+        logger.error(f"Failed to get resin: {str(e)}")
+    return None
+
+
 def do_sign(cookie, user_agent):
-    """ทำ check-in"""
     headers = get_headers(cookie, user_agent)
     res = requests.post(f"{SIGN_URL}?act_id={ACT_ID}", headers=headers, timeout=10)
     data = res.json()
-    logger.info(f"Sign response: {data}")
+    logger.info(f"Sign response: {data.get('retcode')}")
     return data
 
 
+def calculate_resin_recovery_time(current_resin, max_resin=160):
+    if current_resin >= max_resin:
+        return None
+    
+    resin_needed = max_resin - current_resin
+    minutes_needed = resin_needed * 8
+    
+    now = datetime.now(UTC8)
+    recovery_time = now + timedelta(minutes=minutes_needed)
+    
+    return recovery_time
+
+
 def is_cookie_expiring_soon():
-    """ตรวจสอบว่าวันนี้ใกล้วันที่ 25 ของเดือนหรือไม่"""
     now = datetime.now(UTC8)
     return now.day >= 25
 
 
 def summarize_monthly_rewards(rewards, total_sign_days):
-    """สรุปรางวัลที่ได้รับทั้งเดือนจนถึงวันนี้"""
     summary = {}
     for reward in rewards[:total_sign_days]:
         name = reward.get("name", "Unknown")
@@ -78,8 +105,7 @@ def summarize_monthly_rewards(rewards, total_sign_days):
     return summary
 
 
-def build_report(sign_info, rewards, today_reward, tomorrow_reward, already_signed):
-    """สร้างข้อความ report สำหรับ Telegram"""
+def build_report(user_name, sign_info, rewards, today_reward, tomorrow_reward, resin_info, already_signed):
     now  = datetime.now(UTC8)
     tmrw = now + timedelta(days=1)
 
@@ -87,7 +113,7 @@ def build_report(sign_info, rewards, today_reward, tomorrow_reward, already_sign
     missed_days     = sign_info.get("sign_cnt_missed", 0)
 
     lines = []
-    lines.append("Genshin Impact - Daily Check-in Report")
+    lines.append(f"Genshin Impact - {user_name}")
     lines.append(f"Date: {now.strftime('%d/%m/%Y %H:%M')} (UTC+8)")
     lines.append("")
 
@@ -124,6 +150,20 @@ def build_report(sign_info, rewards, today_reward, tomorrow_reward, already_sign
             for item_name, qty in monthly.items():
                 lines.append(f"  {item_name} x{qty}")
 
+    # Resin tracker
+    if resin_info:
+        current_resin = resin_info.get("current_resin", 0)
+        max_resin = resin_info.get("max_resin", 160)
+        
+        lines.append("")
+        lines.append("Resin Status:")
+        lines.append(f"  Current: {current_resin}/{max_resin}")
+        
+        if current_resin < max_resin:
+            recovery_time = calculate_resin_recovery_time(current_resin, max_resin)
+            if recovery_time:
+                lines.append(f"  Full resin at: {recovery_time.strftime('%H:%M')} (in {int((recovery_time - now).total_seconds() / 3600)} hours)")
+
     # เช็คอินครั้งถัดไป
     lines.append("")
     lines.append("Next check-in:")
@@ -133,7 +173,7 @@ def build_report(sign_info, rewards, today_reward, tomorrow_reward, already_sign
     if is_cookie_expiring_soon():
         lines.append("")
         lines.append("Warning: Cookie may expire soon.")
-        lines.append("Please update GENSHIN_COOKIE in GitHub Secrets.")
+        lines.append("Please update cookie in GitHub Secrets.")
 
     return "\n".join(lines)
 
@@ -143,28 +183,22 @@ def send_telegram(token, chat_id, message):
         logger.info("Telegram not configured")
         return
     url = f"https://api.telegram.org/bot{token}/sendMessage"
-    res = requests.post(url, json={"chat_id": chat_id, "text": message}, timeout=10)
-    logger.info(f"Telegram: {res.status_code}")
+    try:
+        res = requests.post(url, json={"chat_id": chat_id, "text": message}, timeout=10)
+        logger.info(f"Telegram: {res.status_code}")
+    except Exception as e:
+        logger.error(f"Telegram error: {str(e)}")
 
 
-def send_discord(webhook_url, message):
-    if not webhook_url:
-        logger.info("Discord not configured")
-        return
-    res = requests.post(webhook_url, json={"content": message}, timeout=10)
-    logger.info(f"Discord: {res.status_code}")
+def process_user(user_config, user_agent):
+    user_name = user_config.get("name", "Unknown")
+    uid = user_config.get("uid")
+    server = user_config.get("server", "os_asia")
+    cookie = user_config.get("cookie")
+    telegram_token = user_config.get("telegram_token")
+    telegram_chat_id = user_config.get("telegram_chat_id")
 
-
-def main():
-    cookie         = os.getenv("GENSHIN_COOKIE")
-    user_agent     = os.getenv("USER_AGENT", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
-    telegram_token = os.getenv("TELEGRAM_TOKEN")
-    telegram_chat  = os.getenv("TELEGRAM_CHAT_ID")
-    discord_hook   = os.getenv("DISCORD_WEBHOOK")
-
-    if not cookie:
-        logger.error("GENSHIN_COOKIE is required")
-        sys.exit(1)
+    logger.info(f"Processing user: {user_name}")
 
     try:
         # ดึงข้อมูล
@@ -172,18 +206,18 @@ def main():
         if not sign_info:
             raise Exception("Failed to get sign info")
 
-        already_signed  = sign_info.get("is_sign", False)
+        already_signed = sign_info.get("is_sign", False)
         total_sign_days = sign_info.get("total_sign_day", 0)
 
         # ดึงรายการรางวัล
         rewards = get_reward_list(cookie, user_agent)
 
         # รางวัลวันนี้และพรุ่งนี้
-        today_idx    = total_sign_days - 1 if already_signed else total_sign_days
-        tmrw_idx     = today_idx + 1
+        today_idx = total_sign_days - 1 if already_signed else total_sign_days
+        tmrw_idx = today_idx + 1
 
-        today_reward    = rewards[today_idx]    if rewards and 0 <= today_idx < len(rewards)    else None
-        tomorrow_reward = rewards[tmrw_idx]     if rewards and 0 <= tmrw_idx < len(rewards)     else None
+        today_reward = rewards[today_idx] if rewards and 0 <= today_idx < len(rewards) else None
+        tomorrow_reward = rewards[tmrw_idx] if rewards and 0 <= tmrw_idx < len(rewards) else None
 
         # Check-in ถ้ายังไม่ได้ทำ
         if not already_signed:
@@ -191,21 +225,54 @@ def main():
             if result.get("retcode") != 0:
                 raise Exception(f"Check-in failed: {result.get('message', 'Unknown error')}")
 
+        # ดึงข้อมูล Resin
+        resin_info = get_resin_info(uid, server, cookie, user_agent)
+
         # สร้าง report
-        report = build_report(sign_info, rewards, today_reward, tomorrow_reward, already_signed)
+        report = build_report(user_name, sign_info, rewards, today_reward, tomorrow_reward, resin_info, already_signed)
 
         logger.info(f"\n{report}")
-        send_telegram(telegram_token, telegram_chat, report)
-        send_discord(discord_hook, report)
+        send_telegram(telegram_token, telegram_chat_id, report)
 
-        sys.exit(0)
+        return True
 
     except Exception as e:
-        message = f"Genshin check-in error: {str(e)}"
+        message = f"Genshin check-in error for {user_name}: {str(e)}"
         logger.error(message)
-        send_telegram(telegram_token, telegram_chat, message)
-        send_discord(discord_hook, message)
+        send_telegram(
+            user_config.get("telegram_token"),
+            user_config.get("telegram_chat_id"),
+            message
+        )
+        return False
+
+
+def main():
+    users_config_json = os.getenv("USERS_CONFIG")
+    user_agent = os.getenv("USER_AGENT", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+
+    if not users_config_json:
+        logger.error("USERS_CONFIG is required")
         sys.exit(1)
+
+    try:
+        users_config = json.loads(users_config_json)
+        if not isinstance(users_config, list):
+            users_config = [users_config]
+    except json.JSONDecodeError as e:
+        logger.error(f"Invalid JSON in USERS_CONFIG: {str(e)}")
+        sys.exit(1)
+
+    logger.info(f"Processing {len(users_config)} user(s)")
+
+    success_count = 0
+    for user_config in users_config:
+        if process_user(user_config, user_agent):
+            success_count += 1
+
+    logger.info(f"Completed: {success_count}/{len(users_config)} successful")
+
+    sys.exit(0 if success_count == len(users_config) else 1)
 
 
 if __name__ == "__main__":
