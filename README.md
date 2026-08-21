@@ -35,7 +35,7 @@ For each user who wants to use this bot:
 1. **Get your Game UID**
    - Open Genshin Impact
    - Check your UID in Paimon Menu or main screen
-   - Example: 815139624
+   - Example: 8xxxxxxxx
 
 2. **Get your Server**
    - Asia: os_asia
@@ -99,9 +99,9 @@ Value (JSON format - replace with your actual values):
 [
   {
     "name": "Your Name",
-    "uid": "815139624",
+    "uid": "8xxxxxxxx",
     "server": "os_asia",
-    "cookie": "ltoken=v2_xxxxx; ltuid_v2=815139624; account_id_v2=85415287; account_mid_v2=xxxxx",
+    "cookie": "ltoken=v2_xxxxx; ltuid_v2=8xxxxxxxx; account_id_v2=85415287; account_mid_v2=xxxxx",
     "telegram_token": "123456789:ABCDEFghijklmnopqrstuvwxyz",
     "telegram_chat_id": "111111111"
   },
